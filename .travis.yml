@@ -4,8 +4,6 @@ env:
   - GO111MODULE=on
 
 go:
-  - 1.11.x
-  - 1.12.x
   - 1.13.x
 
 # Only clone the most recent commit.
@@ -27,5 +25,4 @@ script:
 
 after_success:
   - curl https://deepsource.io/cli | sh
-  - export DEEPSOURCE_DSN=https://6e3e555e89a1438b82a792d9168f420a@deepsource.io
-  - ./bin/deepsource report --analyzer test-coverage --key go --value-file ./cover.out
+  - ./bin/deepsource report --analyzer test-coverage --key go --value-file ./coverage.out
