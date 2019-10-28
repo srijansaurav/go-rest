@@ -1,81 +1,135 @@
 package app
 
 import (
+    "errors"
+    "fmt"
     "os"
-    "encoding/json"
+    "time"
     "github.com/dgrijalva/jwt-go"
     "github.com/esquarer/go-rest/domain"
 )
 
+const (
+    UsernameMinLength int = 3
+    UsernameMaxLength int = 16
+    PasswordMinLength int = 6
+    PasswordMaxLength int = 32
 
-type AuthTokenService interface {
+    tokenExpiryDuration = time.Minute * 5
+)
 
-    GenerateToken(string, string) (string, error)
-    ValidateToken(string) (*domain.AuthToken, error)
-    RefreshToken(string) (string, error)
+var (
+    ErrUsernameLength = fmt.Errorf("username length should be between %v to %v characters", UsernameMinLength, UsernameMaxLength)
+    ErrPasswordLength = fmt.Errorf("password length should be between %v to %v characters", PasswordMinLength, PasswordMaxLength)
+    ErrInvalidToken = errors.New("invalid token")
+    ErrIncorrectCredentials = errors.New("invalid user credentials")
+)
+
+
+// 
+// 
+type userClaims struct {
+    jwt.StandardClaims
+    Username string `json:"username"`
 }
 
 
-type JWTService struct {}
-
-func NewJWTService() *JWTService {
-    return &JWTService{}
+// 
+type JWTService struct {
+    repo    domain.UserRepository
+    secret  []byte
 }
 
-func (service *JWTService) getSecretKey() []byte {
-    key := os.Getenv("JWT_SECRET_KEY")
-    if key == "" { key = "foobar" }
-    return []byte(key)
+func NewJWTService(repo domain.UserRepository) (*JWTService, error) {
+    
+    secret := os.Getenv("JWT_SECRET")
+    if secret == "" {
+        return nil, fmt.Errorf("empty value for JWT_SECRET")
+    }
+
+    return &JWTService{
+        repo: repo,
+        secret: []byte(secret),
+    }, nil
 }
 
-func (service *JWTService) claim(authToken *domain.AuthToken) jwt.Claims {
-    var claim jwt.MapClaims
-    j, _ := json.Marshal(authToken)
-    _ = json.Unmarshal(j, &claim)
-    return claim
+// 
+// 
+func (service *JWTService) newClaims(user *domain.User) (jwt.Claims, int64) {
+
+    now := time.Now()
+    expiresAt := now.Add(tokenExpiryDuration)
+
+    claims := &userClaims{}
+    claims.Username = user.Username
+    claims.StandardClaims.IssuedAt = now.Unix()
+    claims.StandardClaims.ExpiresAt = expiresAt.Unix()
+
+    return claims, claims.StandardClaims.ExpiresAt
 }
 
-func (service *JWTService) generateSignedToken(claim jwt.Claims) (string, error) {
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claim)
-    return token.SignedString(service.getSecretKey())
+// 
+// 
+func (service *JWTService) GenerateToken(user *domain.User) (string, int64, error) {
+
+    claims, expiresAt := service.newClaims(user)
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    signedToken, err := token.SignedString(service.secret)
+    return signedToken, expiresAt, err
 }
 
-func (service *JWTService) GenerateToken(username, access string) (string, error) {
+// 
+// 
+func (service *JWTService) ValidateToken(signedToken string) (*domain.User, error) {
 
-    accessType, err := domain.NewAccessType(access)
-    if err != nil { return "", err }
-
-    authToken := domain.NewAuthToken(username, accessType)
-    claim := service.claim(authToken)
-    return service.generateSignedToken(claim)
-}
-
-func (service *JWTService) ValidateToken(token string) (*domain.AuthToken, error) {
-
-    var claim jwt.MapClaims
-    var authToken *domain.AuthToken
-
-    _, err := jwt.ParseWithClaims(token, &claim, func(token *jwt.Token) (interface{}, error) {
-        return service.getSecretKey(), nil
+    token, err := jwt.ParseWithClaims(signedToken, &userClaims{}, func(t *jwt.Token) (interface{}, error) {
+        return service.secret, nil
     })
 
-    if err != nil { return nil, err }
+    if err != nil || !token.Valid {
+        return nil, ErrInvalidToken
+    }
 
-    j, _ := json.Marshal(claim)
-    _ = json.Unmarshal(j, &authToken)
-    return authToken, nil
+    claims, ok := token.Claims.(*userClaims)
+    if !ok { return nil, ErrInvalidToken }
+
+    return service.repo.FindByUsername(claims.Username)
 }
 
-func (service *JWTService) RefreshToken(token string) (string, error) {
 
-    var refreshedToken string
+type userService struct {
+    repo domain.UserRepository
+}
 
-    authToken, err := service.ValidateToken(token)
-    if err != nil { return refreshedToken, err }
+func NewUserService(repo domain.UserRepository) domain.UserService {
+    return &userService{repo}
+}
 
-    err = authToken.Refresh()
-    if err != nil { return refreshedToken, err }
+func (service *userService) Register(username, password string) (*domain.User, error) {
 
-    claim := service.claim(authToken)
-    return service.generateSignedToken(claim)
+    if len(username) < UsernameMinLength || len(username) > UsernameMaxLength {
+        return nil, ErrUsernameLength
+    }
+    if len(password) < PasswordMinLength || len(password) > PasswordMaxLength  {
+        return nil, ErrPasswordLength
+    }
+
+    user, err := domain.NewUser(username, password)
+    if err != nil { return nil, err }
+
+    err = service.repo.Add(user)
+    if err != nil { return nil, err }
+
+    return user, nil
+}
+
+func (service *userService) Authenticate(username, password string) error {
+    user, err := service.repo.FindByUsername(username)
+    if err != nil { return ErrIncorrectCredentials }
+
+    if !user.VerifyPassword(password) {
+        return ErrIncorrectCredentials
+    }
+
+    return nil
 }

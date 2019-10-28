@@ -1,86 +1,75 @@
 package domain
 
 import (
-    "errors"
-    "strings"
-    "strconv"
-    "time"
+    "golang.org/x/crypto/bcrypt"
 )
 
 
-var ErrInvalidAccessType = errors.New("invalid value for AccessType")
-var ErrTokenExpired = errors.New("AuthToken expired")
-
-
-type AccessType string
-
-const (
-    ReadAccess AccessType  = "READ"
-    WriteAccess AccessType = "WRITE"
-    AdminAccess AccessType = "ADMIN"
-)
-
-func NewAccessType(access string) (AccessType, error) {
-
-    access = strings.ToUpper(access)
-    accessType := AccessType(access)
-
-    switch accessType {
-    case ReadAccess, WriteAccess, AdminAccess:
-        break
-    default:
-        return AccessType(""), ErrInvalidAccessType
-    }
-
-    return accessType, nil
+// 
+type User struct {
+    Username string `json:"username"`
+    Password string `json:"password"`
 }
 
-func (access *AccessType) UnmarshalJSON(data []byte) error {
+// 
+func NewUser(username, password string) (*User, error) {
 
-    unquoteData, err  := strconv.Unquote(string(data))
-    if err != nil { return err }
-    ac, err := NewAccessType(unquoteData)
-    if err != nil { return err }
-    *access = ac
-    return nil
-}
-
-
-const tokenExpiryDuration = time.Minute * 5
-
-type AuthToken struct {
-    IssuedAt    int64 `json:"iat"`
-    ExpiresAt   int64 `json:"exp"`
-    Username    string `json:"preferred_username"`
-    Access      AccessType `json:"access"`
-}
-
-func NewAuthToken(username string, access AccessType) *AuthToken {
-    now := time.Now()
-    expiry := now.Add(tokenExpiryDuration)
-    return &AuthToken{
-        IssuedAt: now.Unix(),
-        ExpiresAt: expiry.Unix(),
+    user := &User{
         Username: username,
-        Access: access,
     }
+    err := user.setPassword(password)
+    if err != nil {
+        return nil, err
+    }
+    return user, nil
 }
 
-func (token *AuthToken) Refresh() error {
-    if token.IsExpired() { return ErrTokenExpired }
-    expiry := time.Now().Add(tokenExpiryDuration)
-    token.ExpiresAt = expiry.Unix()
-    return nil
+// 
+func (u *User) setPassword(rawPassword string) error {
+    hash, err := bcrypt.GenerateFromPassword([]byte(rawPassword), bcrypt.DefaultCost)
+    if err == nil {
+        u.Password = string(hash)
+    }
+    return err
 }
 
-func (token *AuthToken) IsExpired() bool {
-    return token.ExpiresAt < time.Now().Unix()
+// 
+func (u *User) VerifyPassword(inputPassword string) bool {
+    err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(inputPassword))
+    return err == nil
 }
 
-func (token *AuthToken) HasWriteAccess() bool {
-    return token.Access == WriteAccess || token.Access == AdminAccess
+
+// 
+// 
+type UserRepository interface {
+    
+    // 
+    Add(*User) error
+    
+    // 
+    FindByUsername(string) (*User, error)
 }
 
-func (token *AuthToken) HasAdminAccess() bool {
-    return token.Access == AdminAccess
+
+// 
+// 
+type UserService interface {
+    
+    // 
+    Register(string, string) (*User, error)
+
+    // 
+    Authenticate(string, string) (error)
+}
+
+
+
+type TokenService interface {
+
+    // 
+    GenerateToken(*User) (string, int64, error)
+
+    // 
+    ValidateToken(string) (*User, error)
 }
