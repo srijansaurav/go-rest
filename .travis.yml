@@ -40,6 +40,11 @@ before_script:
 
 script:
   - echo $GOREST_MIGRATIONS_FILE_PATH
+  - echo "DeepSource debug begin"
+  - echo $TRAVIS_COMMIT
+  - echo "DS DSN"
+  - echo $DEEPSOURCE_DSN
+  - git --no-pager rev-parse HEAD
   - go test -coverprofile=coverage.out -covermode=atomic -p 1 ./...
 
 after_success:
