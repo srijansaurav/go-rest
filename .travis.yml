@@ -42,6 +42,7 @@ script:
   - echo $GOREST_MIGRATIONS_FILE_PATH
   - echo "DeepSource debug begin"
   - echo $TRAVIS_COMMIT
+  - echo $TRAVIS_PULL_REQUEST_SHA
   - echo "DS DSN"
   - echo $DEEPSOURCE_DSN
   - git --no-pager rev-parse HEAD
