@@ -45,7 +45,7 @@ script:
   - echo "DS DSN"
   - echo $DEEPSOURCE_DSN
   - git --no-pager rev-parse HEAD
-  - echo "Last 5 commits"
+  - echo "Latest commits"
   - git log -n5
   - go test -coverprofile=coverage.out -covermode=atomic -p 1 ./...
 
